@@ -11,6 +11,8 @@
 #  Oracle 闲置判定是 7 天内 CPU、网络、内存三项同时低于 20%（CPU 为 P95）。
 #  三项必须同时成立才算闲置，所以只要 CPU 一项破 20% 就不算闲置。
 #  本脚本每 3 小时跑 15 分钟单核负载，约占时间 8.3%（>5%），足以把 P95 CPU 推过 20%。
+#  负载用 nice -n 19 低优先级跑：你的程序优先抢 CPU，负载只吃空闲 CPU，
+#  日常用起来几乎感觉不到；系统总 CPU 利用率照样计入 nice 进程，所以保活效果不变。
 #  不主动占内存，避免小内存机器 OOM；CPU 单项已足够。
 #
 # TG 通知（可选，默认不刷屏）：
@@ -78,10 +80,10 @@ log "保活负载开始（${LOAD_SECONDS} 秒，单核）"
 
 RC=0
 if command -v stress-ng >/dev/null 2>&1; then
-  stress-ng --cpu 1 --timeout "${LOAD_SECONDS}s" >/dev/null 2>&1 || RC=$?
+  nice -n 19 stress-ng --cpu 1 --timeout "${LOAD_SECONDS}s" >/dev/null 2>&1 || RC=$?
 else
-  # yes 只占 1 个核；timeout 到时返回 124，属正常结束，不是失败
-  timeout "$LOAD_SECONDS" yes >/dev/null 2>&1 || RC=$?
+  # yes 只占 1 个核，nice -n 19 低优先级；timeout 到时返回 124，属正常结束，不是失败
+  nice -n 19 timeout "$LOAD_SECONDS" yes >/dev/null 2>&1 || RC=$?
   [ "$RC" = "124" ] && RC=0
 fi
 

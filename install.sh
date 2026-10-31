@@ -51,8 +51,8 @@ else
 fi
 
 # ---- 10 秒冒烟测试（不是完整 15 分钟负载，只验证脚本能跑）----
-echo "冒烟测试（10 秒）..."
-timeout 10 yes >/dev/null 2>&1 || true
+echo "冒烟测试（10 秒，低优先级）..."
+nice -n 19 timeout 10 yes >/dev/null 2>&1 || true
 touch /var/log/oracle-keepalive.log 2>/dev/null || true
 echo "$(date '+%F %T') [$(hostname)] 保活安装完成，冒烟测试通过" >> /var/log/oracle-keepalive.log
 
