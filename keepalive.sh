@@ -19,6 +19,7 @@
 #    TG_CHAT_ID="123456789"
 #    NOTIFY_EVERY_RUN=0   # 0=每天首次运行后发 1 条汇总，失败立即发；1=每轮都发
 #  通知时机：安装时 1 条、每天首次负载完成 1 条、失败立即 1 条，其余运行只写本地日志。
+#  每条 TG 通知都带机器信息（主机名 + 公网 IP + 内网 IP），多台机发来时一眼能分清是哪台。
 #
 # 日志：/var/log/oracle-keepalive.log
 # 状态：/var/lib/oracle-keepalive/last-notify-date
@@ -29,6 +30,9 @@ LOG_FILE="/var/log/oracle-keepalive.log"
 STATE_DIR="/var/lib/oracle-keepalive"
 CONFIG_FILE="$INSTALL_DIR/tg.conf"
 HOST="$(hostname 2>/dev/null || echo unknown)"
+LOCAL_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -z "$LOCAL_IP" ] && LOCAL_IP="unknown"
+MACHINE_INFO="机器：${HOST} | 内网 IP：${LOCAL_IP}"
 LOAD_SECONDS=900
 NOTIFY_EVERY_RUN=0
 TG_BOT_TOKEN=""
@@ -54,6 +58,12 @@ touch "$LOG_FILE" 2>/dev/null || LOG_FILE="/tmp/oracle-keepalive.log"
 if [ -f "$CONFIG_FILE" ]; then
   # shellcheck disable=SC1090
   . "$CONFIG_FILE" 2>/dev/null || true
+fi
+# 只有配了 TG 才探公网 IP（不配 TG 就完全不联网）；探不到用内网 IP 兜底
+if [ -n "$TG_BOT_TOKEN" ] && [ -n "$TG_CHAT_ID" ]; then
+  EXT_IP="$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || curl -s --max-time 5 https://ifconfig.me 2>/dev/null || echo "")"
+  [ -z "$EXT_IP" ] && EXT_IP="$LOCAL_IP"
+  MACHINE_INFO="机器：${HOST} | 公网 IP：${EXT_IP} | 内网 IP：${LOCAL_IP}"
 fi
 
 # 防重叠：上一轮还没跑完就跳过（flock 不可用时用 PID 文件兜底）
@@ -81,7 +91,9 @@ LOADAVG="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo unknown)"
 
 if [ "$RC" != "0" ]; then
   log "保活负载失败，退出码 $RC"
-  send_tg "⚠️ Oracle 保活失败 [$HOST]：负载退出码 $RC，时间 $(date '+%F %T')，请登录该机检查。"
+  send_tg "⚠️ Oracle 保活失败
+${MACHINE_INFO}
+负载退出码 $RC，时间 $(date '+%F %T')，请登录该机检查。"
   exit 1
 fi
 
@@ -92,7 +104,9 @@ TODAY="$(date '+%F')"
 LAST_FILE="$STATE_DIR/last-notify-date"
 LAST="$(cat "$LAST_FILE" 2>/dev/null || echo "")"
 if [ "$NOTIFY_EVERY_RUN" = "1" ] || [ "$LAST" != "$TODAY" ]; then
-  send_tg "✅ Oracle 保活 [$HOST]：今日负载已完成 1 轮（${LOAD_SECONDS} 秒单核），时间 $(date '+%F %T')，负载 $LOADAVG。"
+  send_tg "✅ Oracle 保活
+${MACHINE_INFO}
+今日负载已完成 1 轮（${LOAD_SECONDS} 秒单核），时间 $(date '+%F %T')，负载 $LOADAVG。"
   echo "$TODAY" > "$LAST_FILE" 2>/dev/null || true
 fi
 

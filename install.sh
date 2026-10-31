@@ -56,13 +56,18 @@ timeout 10 yes >/dev/null 2>&1 || true
 touch /var/log/oracle-keepalive.log 2>/dev/null || true
 echo "$(date '+%F %T') [$(hostname)] 保活安装完成，冒烟测试通过" >> /var/log/oracle-keepalive.log
 
-# 安装成功 TG 通知
+# 安装成功 TG 通知（带机器信息，多台机发来时能分清）
 if [ -f "$INSTALL_DIR/tg.conf" ]; then
   # shellcheck disable=SC1091
   . "$INSTALL_DIR/tg.conf"
+  _HOST="$(hostname 2>/dev/null || echo unknown)"
+  _LOCAL="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  _EXT="$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || echo "$_LOCAL")"
   curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
     --data-urlencode "chat_id=${TG_CHAT_ID}" \
-    --data-urlencode "text=✅ Oracle 保活已安装 [$(hostname)]：每 3 小时跑 15 分钟单核负载，TG 通知为每天首次完成 1 条、失败立即发。" \
+    --data-urlencode "text=✅ Oracle 保活已安装
+机器：${_HOST} | 公网 IP：${_EXT} | 内网 IP：${_LOCAL}
+每 3 小时跑 15 分钟单核负载，TG 通知为每天首次完成 1 条、失败立即发。" \
     --data-urlencode "disable_web_page_preview=true" >/dev/null 2>&1 || echo "TG 安装通知发送失败（不影响保活本身）"
 fi
 
