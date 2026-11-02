@@ -50,7 +50,34 @@ send_tg() {
   curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
     --data-urlencode "chat_id=${TG_CHAT_ID}" \
     --data-urlencode "text=$1" \
+    --data-urlencode "parse_mode=HTML" \
     --data-urlencode "disable_web_page_preview=true" >/dev/null 2>&1 || true
+}
+
+# 国家代码转国旗：JP -> 🇯🇵，不用 jq / python，只用 bash + UTF-8 八进制
+flag_emoji() {
+  local cc="${1^^}" o1 o2
+  [ ${#cc} -ne 2 ] && return 0
+  o1=$(( $(printf '%d' "'${cc:0:1}") - 65 ))
+  o2=$(( $(printf '%d' "'${cc:1:1}") - 65 ))
+  printf '%b%b' "$(printf '\\360\\237\\207\\%03o' $((166+o1)))" "$(printf '\\360\\237\\207\\%03o' $((166+o2)))"
+}
+
+# 只在真正要发 TG 时查一次归属地；查不到就留空，不让通知失败
+GEO_BLOCK=""
+fetch_geo() {
+  GEO_BLOCK=""
+  local geo country cc city isp flag
+  geo="$(curl -s --max-time 5 'http://ip-api.com/json/?fields=status,country,countryCode,city,isp' 2>/dev/null || true)"
+  echo "$geo" | grep -q '"status":"success"' || return 0
+  country="$(echo "$geo" | sed -n 's/.*"country":"\([^"]*\)".*/\1/p')"
+  cc="$(echo "$geo" | sed -n 's/.*"countryCode":"\([^"]*\)".*/\1/p')"
+  city="$(echo "$geo" | sed -n 's/.*"city":"\([^"]*\)".*/\1/p')"
+  isp="$(echo "$geo" | sed -n 's/.*"isp":"\([^"]*\)".*/\1/p')"
+  flag="$(flag_emoji "$cc")"
+  GEO_BLOCK="📍 <b>位置</b>：${flag} ${country}${city:+ · ${city}}"
+  [ -n "$isp" ] && GEO_BLOCK="${GEO_BLOCK}
+🏢 <b>线路</b>：<code>${isp}</code>"
 }
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
@@ -93,9 +120,18 @@ LOADAVG="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo unknown)"
 
 if [ "$RC" != "0" ]; then
   log "保活负载失败，退出码 $RC"
-  send_tg "⚠️ Oracle 保活失败
-${MACHINE_INFO}
-负载退出码 $RC，时间 $(date '+%F %T')，请登录该机检查。"
+  fetch_geo
+  send_tg "🚨 <b>Oracle 保活失败</b>
+━━━━━━━━━━━━━━
+🖥️ <b>机器</b>：<code>${HOST}</code>
+🌐 <b>公网</b>：<code>${EXT_IP:-$LOCAL_IP}</code>
+🏠 <b>内网</b>：<code>${LOCAL_IP}</code>
+${GEO_BLOCK}
+🐧 <b>内核</b>：<code>$(uname -r)</code>
+━━━━━━━━━━━━━━
+❌ 退出码：<code>$RC</code>
+🕐 时间：<code>$(date '+%F %T')</code>
+👉 请登录该机检查。"
   exit 1
 fi
 
@@ -106,9 +142,18 @@ TODAY="$(date '+%F')"
 LAST_FILE="$STATE_DIR/last-notify-date"
 LAST="$(cat "$LAST_FILE" 2>/dev/null || echo "")"
 if [ "$NOTIFY_EVERY_RUN" = "1" ] || [ "$LAST" != "$TODAY" ]; then
-  send_tg "✅ Oracle 保活
-${MACHINE_INFO}
-今日负载已完成 1 轮（${LOAD_SECONDS} 秒单核），时间 $(date '+%F %T')，负载 $LOADAVG。"
+  fetch_geo
+  send_tg "✅ <b>Oracle 保活 · 今日完成</b>
+━━━━━━━━━━━━━━
+🖥️ <b>机器</b>：<code>${HOST}</code>
+🌐 <b>公网</b>：<code>${EXT_IP:-$LOCAL_IP}</code>
+🏠 <b>内网</b>：<code>${LOCAL_IP}</code>
+${GEO_BLOCK}
+🐧 <b>内核</b>：<code>$(uname -r)</code>
+━━━━━━━━━━━━━━
+⏱️ 本轮：<code>${LOAD_SECONDS} 秒单核 · nice -n 19</code>
+📊 负载：<code>$LOADAVG</code>
+🕐 时间：<code>$(date '+%F %T')</code>"
   echo "$TODAY" > "$LAST_FILE" 2>/dev/null || true
 fi
 

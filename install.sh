@@ -63,11 +63,33 @@ if [ -f "$INSTALL_DIR/tg.conf" ]; then
   _HOST="$(hostname 2>/dev/null || echo unknown)"
   _LOCAL="$(hostname -I 2>/dev/null | awk '{print $1}')"
   _EXT="$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null || echo "$_LOCAL")"
+  _GEO=""
+  _GEOJSON="$(curl -s --max-time 5 'http://ip-api.com/json/?fields=status,country,countryCode,city,isp' 2>/dev/null || true)"
+  if echo "$_GEOJSON" | grep -q '"status":"success"'; then
+    _CC="$(echo "$_GEOJSON" | sed -n 's/.*"countryCode":"\([^"]*\)".*/\1/p' | tr 'a-z' 'A-Z')"
+    _COUNTRY="$(echo "$_GEOJSON" | sed -n 's/.*"country":"\([^"]*\)".*/\1/p')"
+    _CITY="$(echo "$_GEOJSON" | sed -n 's/.*"city":"\([^"]*\)".*/\1/p')"
+    _ISP="$(echo "$_GEOJSON" | sed -n 's/.*"isp":"\([^"]*\)".*/\1/p')"
+    if [ ${#_CC} -eq 2 ]; then
+      _O1=$(( $(printf '%d' "'${_CC:0:1}") - 65 )); _O2=$(( $(printf '%d' "'${_CC:1:1}") - 65 ))
+      _FLAG="$(printf '%b%b' "$(printf '\\360\\237\\207\\%03o' $((166+_O1)))" "$(printf '\\360\\237\\207\\%03o' $((166+_O2)))")"
+      _GEO="📍 <b>位置</b>：${_FLAG} ${_COUNTRY}${_CITY:+ · ${_CITY}}
+🏢 <b>线路</b>：<code>${_ISP}</code>"
+    fi
+  fi
   curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
     --data-urlencode "chat_id=${TG_CHAT_ID}" \
-    --data-urlencode "text=✅ Oracle 保活已安装
-机器：${_HOST} | 公网 IP：${_EXT} | 内网 IP：${_LOCAL}
-每 3 小时跑 15 分钟单核负载，TG 通知为每天首次完成 1 条、失败立即发。" \
+    --data-urlencode "text=🛡️ <b>Oracle 保活已安装</b>
+━━━━━━━━━━━━━━
+🖥️ <b>机器</b>：<code>${_HOST}</code>
+🌐 <b>公网</b>：<code>${_EXT}</code>
+🏠 <b>内网</b>：<code>${_LOCAL}</code>
+${_GEO}
+🐧 <b>内核</b>：<code>$(uname -r)</code>
+━━━━━━━━━━━━━━
+⏱️ 周期：<code>每 3 小时 · 15 分钟单核 · nice -n 19</code>
+🔔 通知：<code>每天首次完成 1 条 · 失败立即发</code>" \
+    --data-urlencode "parse_mode=HTML" \
     --data-urlencode "disable_web_page_preview=true" >/dev/null 2>&1 || echo "TG 安装通知发送失败（不影响保活本身）"
 fi
 
